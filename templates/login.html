@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="he" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>כניסה · FreezeM Sensor Watch</title>
+  <title>Sign in · FreezeM Sensor Watch</title>
   <style>
     :root{font-family:Arial,sans-serif;color:#17212b;background:#eef3f6}body{margin:0;min-height:100vh;display:grid;place-items:center}.box{width:min(380px,calc(100% - 40px));background:#fff;border-radius:18px;padding:30px;box-shadow:0 12px 40px #17212b20;border-top:7px solid #087f8c}h1{margin:0 0 8px;font-size:26px}.sub{color:#657683;margin-bottom:24px}label{display:block;font-weight:700;margin:14px 0 6px}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #bdc9d0;border-radius:9px;font-size:16px}button{width:100%;margin-top:22px;border:0;border-radius:10px;background:#087f8c;color:#fff;padding:13px;font-weight:700;font-size:16px;cursor:pointer}.error{background:#ffe5e8;color:#9d1e2d;border-radius:9px;padding:10px;margin-bottom:12px}
   </style>
 </head>
-<body><form class="box" method="post"><h1>FreezeM Sensor Watch</h1><div class="sub">כניסה לדשבורד הניטור</div>{% if error %}<div class="error">{{ error }}</div>{% endif %}<label for="username">שם משתמש</label><input id="username" name="username" autocomplete="username" required autofocus><label for="password">סיסמה</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">כניסה</button></form></body>
+<body><form class="box" method="post"><h1>FreezeM Sensor Watch</h1><div class="sub">Sign in to the monitoring dashboard</div>{% if error %}<div class="error">{{ error }}</div>{% endif %}<label for="username">Username</label><input id="username" name="username" autocomplete="username" required autofocus><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Sign in</button></form></body>
 </html>
