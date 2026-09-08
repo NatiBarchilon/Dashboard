@@ -10,12 +10,13 @@ from zoneinfo import ZoneInfo
 import boto3
 import requests
 from botocore.config import Config
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("sensor-watch")
 app = Flask(__name__)
+app.secret_key = os.getenv("SESSION_SECRET", "development-only-change-me")
 
 LOCK = threading.Lock()
 STATE = {"checked_at": None, "systems": [], "error": None}
@@ -24,17 +25,35 @@ ALERTED = {}
 
 @app.before_request
 def require_dashboard_login():
-    if request.path == "/health":
+    if request.path in ("/health", "/login"):
         return None
-    expected = os.getenv("DASHBOARD_PASSWORD")
-    if not expected:
-        return Response("Dashboard password is not configured", status=503)
-    auth = request.authorization
-    valid_user = bool(auth) and secrets.compare_digest(auth.username or "", os.getenv("DASHBOARD_USERNAME", "admin"))
-    valid_password = bool(auth) and secrets.compare_digest(auth.password or "", expected)
-    if not (valid_user and valid_password):
-        return Response("Authentication required", status=401, headers={"WWW-Authenticate": 'Basic realm="FreezeM Sensor Watch"'})
-    return None
+    if session.get("authenticated"):
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Authentication required"}), 401
+    return redirect(url_for("login"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        expected_user = os.getenv("DASHBOARD_USERNAME", "admin")
+        expected_password = os.getenv("DASHBOARD_PASSWORD", "")
+        valid_user = secrets.compare_digest(request.form.get("username", ""), expected_user)
+        valid_password = bool(expected_password) and secrets.compare_digest(request.form.get("password", ""), expected_password)
+        if valid_user and valid_password:
+            session.clear()
+            session["authenticated"] = True
+            return redirect(url_for("dashboard"))
+        error = "שם המשתמש או הסיסמה אינם נכונים"
+    return render_template("login.html", error=error)
+
+
+@app.get("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 def env_float(name, default):
