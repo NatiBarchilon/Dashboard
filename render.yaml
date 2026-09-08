@@ -11,6 +11,10 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: DASHBOARD_USERNAME
+        value: admin
+      - key: DASHBOARD_PASSWORD
+        generateValue: true
       - key: S3_BUCKET
         sync: false
       - key: S3_ACCESS_KEY_ID
