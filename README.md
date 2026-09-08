@@ -18,6 +18,7 @@ Web dashboard for monitoring the newest files from four sensor prefixes in an S3
 - `STALE_AFTER_HOURS`: defaults to 2.
 - `CHECK_INTERVAL_MINUTES`: defaults to 10.
 - `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD`: HTTP Basic Auth credentials for the dashboard.
+- Email alerts: set `EMAIL_TO`, `EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
 
 The app only lists object metadata and never downloads sensor files. Grant its access key read/list access to the configured bucket and prefixes only.
 
