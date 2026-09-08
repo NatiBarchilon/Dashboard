@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -9,7 +10,7 @@ from zoneinfo import ZoneInfo
 import boto3
 import requests
 from botocore.config import Config
-from flask import Flask, jsonify, render_template
+from flask import Flask, Response, jsonify, render_template, request
 
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -19,6 +20,21 @@ app = Flask(__name__)
 LOCK = threading.Lock()
 STATE = {"checked_at": None, "systems": [], "error": None}
 ALERTED = {}
+
+
+@app.before_request
+def require_dashboard_login():
+    if request.path == "/health":
+        return None
+    expected = os.getenv("DASHBOARD_PASSWORD")
+    if not expected:
+        return Response("Dashboard password is not configured", status=503)
+    auth = request.authorization
+    valid_user = bool(auth) and secrets.compare_digest(auth.username or "", os.getenv("DASHBOARD_USERNAME", "admin"))
+    valid_password = bool(auth) and secrets.compare_digest(auth.password or "", expected)
+    if not (valid_user and valid_password):
+        return Response("Authentication required", status=401, headers={"WWW-Authenticate": 'Basic realm="FreezeM Sensor Watch"'})
+    return None
 
 
 def env_float(name, default):
