@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="he" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>FreezeM Sensor Watch</title>
@@ -14,11 +14,11 @@
   </style>
 </head>
 <body><main class="wrap">
-  <header><div><h1>FreezeM Sensor Watch</h1><div class="sub" id="checked">טוען נתונים…</div></div><div><button onclick="loadStatus()">רענון עכשיו</button> <a href="/logout">יציאה</a></div></header>
+  <header><div><h1>FreezeM Sensor Watch</h1><div class="sub" id="checked">Loading status…</div></div><div><button onclick="loadStatus()">Refresh now</button> <a href="/logout">Sign out</a></div></header>
   <div id="error" class="error"></div><section id="grid" class="grid"></section>
 </main><script>
-const labels={ok:'תקין',stale:'אין קובץ חדש',missing:'לא נמצאו קבצים'};
+const labels={ok:'Online',stale:'No recent file',missing:'No files found'};
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function loadStatus(){const error=document.querySelector('#error');try{const r=await fetch('/api/status',{cache:'no-store'});const d=await r.json();error.style.display=d.error?'block':'none';error.textContent=d.error||'';document.querySelector('#checked').textContent='בדיקה אחרונה: '+new Date(d.checked_at).toLocaleString('he-IL')+' · סף התראה: '+d.threshold_hours+' שעות';document.querySelector('#grid').innerHTML=d.systems.map(s=>`<article class="card ${esc(s.status)}"><div class="head"><span class="name">${esc(s.name)}</span><span class="pill">${labels[s.status]||s.status}</span></div><div class="age">${s.age_hours===null?'—':esc(s.age_hours)+' ש׳'}</div><div class="muted">מאז הקובץ האחרון</div><div class="file">${esc(s.last_file||'לא נמצא קובץ')}</div></article>`).join('')}catch(e){error.style.display='block';error.textContent='לא ניתן לטעון את הסטטוס: '+e}}
+async function loadStatus(){const error=document.querySelector('#error');try{const r=await fetch('/api/status',{cache:'no-store'});const d=await r.json();error.style.display=d.error?'block':'none';error.textContent=d.error||'';document.querySelector('#checked').textContent='Last checked: '+new Date(d.checked_at).toLocaleString('en-GB')+' · Alert threshold: '+d.threshold_hours+' hours';document.querySelector('#grid').innerHTML=d.systems.map(s=>`<article class="card ${esc(s.status)}"><div class="head"><span class="name">${esc(s.name)}</span><span class="pill">${labels[s.status]||s.status}</span></div><div class="age">${s.age_hours===null?'—':esc(s.age_hours)+' h'}</div><div class="muted">Since the latest file</div><div class="file">${esc(s.last_file||'No file found')}</div></article>`).join('')}catch(e){error.style.display='block';error.textContent='Could not load status: '+e}}
 loadStatus();setInterval(loadStatus,60000);
 </script></body></html>
