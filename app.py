@@ -35,12 +35,7 @@ def sensor_config():
         if not isinstance(data, list) or not data:
             raise ValueError("SENSOR_CONFIG_JSON must be a non-empty JSON array")
         return data
-    return [
-        {"id": "microphone", "name": "מיקרופון Mic1", "prefix": "sensor/audio/Mic1/"},
-        {"id": "cage_view", "name": "מצלמת CageView", "prefix": "sensor/CageView/"},
-        {"id": "camera_dev2", "name": "מצלמת Dev2", "prefix": "sensor/camera/Dev2/"},
-        {"id": "radar", "name": "ראדאר", "prefix": "sensor/radar/"},
-    ]
+    raise ValueError("SENSOR_CONFIG_JSON is not configured")
 
 
 def s3_client():
