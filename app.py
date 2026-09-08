@@ -2,9 +2,11 @@ import json
 import logging
 import os
 import secrets
+import smtplib
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -128,6 +130,25 @@ def send_alert(message):
             json={"chat_id": telegram_chat, "text": message}, timeout=15,
         )
         response.raise_for_status()
+    smtp_host = os.getenv("SMTP_HOST")
+    recipients = [x.strip() for x in os.getenv("EMAIL_TO", "").split(",") if x.strip()]
+    if smtp_host and recipients:
+        email = EmailMessage()
+        email["Subject"] = "FreezeM Sensor Watch alert"
+        email["From"] = os.getenv("EMAIL_FROM", os.getenv("SMTP_USERNAME", ""))
+        email["To"] = ", ".join(recipients)
+        email.set_content(message)
+        port = int(os.getenv("SMTP_PORT", "587"))
+        with smtplib.SMTP(smtp_host, port, timeout=20) as server:
+            server.ehlo()
+            if os.getenv("SMTP_STARTTLS", "true").lower() == "true":
+                server.starttls()
+                server.ehlo()
+            username = os.getenv("SMTP_USERNAME")
+            password = os.getenv("SMTP_PASSWORD")
+            if username and password:
+                server.login(username, password)
+            server.send_message(email)
 
 
 def run_check(send_notifications=True):
