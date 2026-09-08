@@ -17,6 +17,7 @@ Web dashboard for monitoring the newest files from four sensor prefixes in an S3
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`: optional Telegram alerts.
 - `STALE_AFTER_HOURS`: defaults to 2.
 - `CHECK_INTERVAL_MINUTES`: defaults to 10.
+- `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD`: HTTP Basic Auth credentials for the dashboard.
 
 The app only lists object metadata and never downloads sensor files. Grant its access key read/list access to the configured bucket and prefixes only.
 
