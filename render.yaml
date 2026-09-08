@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: freezem-sensor-watch
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 60 app:app
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_REGION
+        value: eu-central-1
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: SENSOR_CONFIG_JSON
+        sync: false
+      - key: DATA_TIMEZONE
+        value: Asia/Jerusalem
+      - key: STALE_AFTER_HOURS
+        value: "2"
+      - key: CHECK_INTERVAL_MINUTES
+        value: "10"
+      - key: ALERT_WEBHOOK_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
