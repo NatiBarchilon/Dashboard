@@ -46,7 +46,7 @@ def login():
             session.clear()
             session["authenticated"] = True
             return redirect(url_for("dashboard"))
-        error = "שם המשתמש או הסיסמה אינם נכונים"
+        error = "Incorrect username or password"
     return render_template("login.html", error=error)
 
 
@@ -156,14 +156,17 @@ def run_check(send_notifications=True):
 
             incident = row["status"] != "ok"
             if send_notifications and incident and not ALERTED.get(sensor["id"]):
-                age = "לא נמצא קובץ" if row["age_hours"] is None else f"{row['age_hours']:.1f} שעות"
-                send_alert(f"⚠️ FreezeM Sensor Watch: {sensor['name']} לא העלתה קובץ בזמן ({age}).")
+                age = "no file found" if row["age_hours"] is None else f"{row['age_hours']:.1f} hours"
+                send_alert(f"⚠️ FreezeM Sensor Watch: {sensor['name']} has not uploaded a file on time ({age}).")
                 ALERTED[sensor["id"]] = True
             elif not incident and ALERTED.pop(sensor["id"], None) and send_notifications:
-                send_alert(f"✅ FreezeM Sensor Watch: {sensor['name']} חזרה לפעילות תקינה.")
+                send_alert(f"✅ FreezeM Sensor Watch: {sensor['name']} is operating normally again.")
     except Exception as exc:
         log.exception("Monitoring check failed")
-        error = str(exc)
+        if isinstance(exc, KeyError) and str(exc).strip("'") in {"S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"}:
+            error = "Storage credentials are not configured yet. Add S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY in Render Environment."
+        else:
+            error = str(exc)
 
     snapshot = {"checked_at": now.isoformat(), "systems": results, "error": error,
                 "threshold_hours": threshold}
