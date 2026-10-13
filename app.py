@@ -7,6 +7,7 @@ import secrets
 import threading
 import time
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 from botocore.config import Config
@@ -73,45 +74,59 @@ def system_view(sensor,items,start,end,now):
             'gap_count':sum(s['status']=='missing' for s in cov['segments'])}
 
 
+def loading_system(sensor,start,end):
+    return {**sensor,'status':'scanning','files':[],'segments':[],'coverage_percent':None,
+            'file_count':0,'missing_seconds':None,'scan_complete':False}
+
+
+def scan_sensor(index,sensor,start,end,now):
+    try:
+        items=index.scan(sensor,start,end)
+        row=system_view(sensor,items,start,end,now)
+        row['scan_complete']=True
+        log.info('COVERAGE %s files=%s cadence=%s missing_minutes=%.1f unreadable=%s',sensor['id'],len(items),row['cadence_seconds'],row['missing_seconds']/60,sum(bool(x.get('error')) for x in items))
+        if items:
+            log.info('RECORDING_FORMAT %s %s',sensor['id'],json.dumps([
+                {'name':x.get('name'),'duration':x.get('duration'),'error':x.get('error')} for x in items[:2]]))
+        return row
+    except Exception:
+        log.exception('Sensor scan failed for %s',sensor['id'])
+        return {**sensor,'status':'unknown','error':'Could not read storage for this system. Refresh to retry.',
+                'files':[],'segments':[{'start':start,'end':end,'status':'unknown'}],
+                'coverage_percent':None,'unknown_seconds':end-start,'scan_complete':True}
+
+
 def scan_into(target,start,end):
-    """Runs once per user request. Partial progress is safe to poll."""
+    """All systems visible immediately; each scan completes independently."""
     now=time.time()
-    results=[]
     error=None
     try:
-        index=get_index()
-        for sensor in sensor_config():
-            try:
-                items=index.scan(sensor,start,end)
-                row=system_view(sensor,items,start,end,now)
-                log.info('COVERAGE %s files=%s cadence=%s missing_minutes=%.1f unreadable=%s',sensor['id'],len(items),row['cadence_seconds'],row['missing_seconds']/60,sum(bool(x.get('error')) for x in items))
-                # Formats only, never credentials or presigned URLs.
-                if items:
-                    log.info('RECORDING_FORMAT %s %s',sensor['id'],json.dumps([
-                        {'name':x.get('name'),'duration':x.get('duration'),'error':x.get('error')} for x in items[:2]]))
-            except Exception:
-                log.exception('Sensor scan failed for %s',sensor['id'])
-                row={**sensor,'status':'unknown','error':'Could not read storage for this system. Refresh to retry.',
-                     'files':[],'segments':[{'start':start,'end':end,'status':'unknown'}],
-                     'coverage_percent':None,'unknown_seconds':end-start}
-            results.append(row)
-            with LOCK:
-                target.update(systems=list(results),completed_systems=len(results))
+        index=get_index();sensors=sensor_config()
+        with LOCK: target['systems']=[loading_system(s,start,end) for s in sensors]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures={pool.submit(scan_sensor,index,sensor,start,end,now):sensor['id'] for sensor in sensors}
+            for future in as_completed(futures):
+                row=future.result()
+                with LOCK:
+                    target['systems']=[row if x['id']==row['id'] else x for x in target['systems']]
+                    target['completed_systems']=sum(x.get('scan_complete',False) for x in target['systems'])
+        with LOCK: results=list(target['systems'])
         error='Some systems could not be read; their timeline is shown in grey.' if any(x.get('error') for x in results) else None
     except Exception:
         log.exception('Storage scan failed')
         error='Could not scan storage. Refresh to retry.'
     finally:
         with LOCK:
-            target.update(checked_at=iso(time.time()),systems=results,error=error,
-                          start=start,end=end,timezone=os.getenv('DATA_TIMEZONE','Asia/Jerusalem'),
-                          scanning=False,mode='on_demand',version='2.1')
+            target.update(checked_at=iso(time.time()),error=error,start=start,end=end,
+                          timezone=os.getenv('DATA_TIMEZONE','Asia/Jerusalem'),
+                          scanning=False,mode='on_demand',version='2.2')
 
 
 def start_scan(target,start,end):
     with LOCK:
         if target.get('scanning'): return False
-        target.update(scanning=True,started_at=iso(time.time()),start=start,end=end,completed_systems=0,error=None)
+        target.update(scanning=True,started_at=iso(time.time()),start=start,end=end,completed_systems=0,error=None,
+                      systems=[loading_system(s,start,end) for s in sensor_config()])
     threading.Thread(target=scan_into,args=(target,start,end),daemon=True,name='requested-storage-scan').start()
     return True
 
@@ -163,7 +178,7 @@ def dashboard():
 
 
 @app.get('/health')
-def health(): return jsonify(ok=True,version='2.1',mode='on_demand')
+def health(): return jsonify(ok=True,version='2.2',mode='on_demand')
 
 
 @app.get('/api/status')
@@ -184,9 +199,9 @@ def refresh():
 def history():
     try:
         start=float(request.args['start']);end=float(request.args['end'])
-        if not math.isfinite(start) or not math.isfinite(end) or not 0<end-start<=86400*7 or end>time.time()+60:
+        if not math.isfinite(start) or not math.isfinite(end) or not 0<end-start<=86400*31 or end>time.time()+60:
             raise ValueError()
-    except (KeyError,ValueError): return jsonify(error='Choose a past range of up to 7 days'),400
+    except (KeyError,ValueError): return jsonify(error='Choose a past range of up to 31 days'),400
     key=(start,end)
     with LOCK:
         if key not in HISTORY:
@@ -239,6 +254,7 @@ def radar():
     index,item=selected_file()
     if item['kind']!='csv': abort(400)
     rows=radar_rows(index.client,index.bucket,item['key'],item['size'],index.tz)
+    if not rows: return jsonify(error='No readable timestamps in this radar CSV; its column format has been logged for diagnosis.'),422
     bins={}
     for row in rows:
         minute=int(row['t']//60)*60;bins.setdefault(minute,[]).append(row)

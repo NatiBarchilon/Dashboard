@@ -148,3 +148,59 @@ def test_history_is_async_not_a_blocking_http_scan(monkeypatch):
     response=client.get('/api/history?start=100&end=10000')
     assert response.status_code==200 and start.call_count==1
     assert client.get('/api/history?start=nan&end=10000').status_code==400
+
+
+def test_month_history_supported(monkeypatch):
+    monkeypatch.setattr(app,'HISTORY',{})
+    start=Mock();monkeypatch.setattr(app,'start_scan',start)
+    client=app.app.test_client()
+    with client.session_transaction() as session:session['authenticated']=True
+    now=int(app.time.time())
+    assert client.get(f'/api/history?start={now-30*86400}&end={now}').status_code==200
+    assert start.call_count==1
+    assert client.get(f'/api/history?start={now-32*86400}&end={now}').status_code==400
+
+
+def test_all_systems_visible_before_scan_completes(monkeypatch):
+    monkeypatch.setattr(app,'sensor_config',lambda:[{'id':x,'name':x,'prefix':x+'/'} for x in ['mic','radar','cam1','cam2']])
+    monkeypatch.setattr(app.threading,'Thread',Mock())
+    target={}
+    app.start_scan(target,100,10000)
+    assert [s['id'] for s in target['systems']]==['mic','radar','cam1','cam2']
+    assert all(s['status']=='scanning' for s in target['systems'])
+
+
+def test_filename_index_handles_fragmented_video_without_reading_content():
+    from recordings import Index
+    start=datetime(2026,10,13,0,0,tzinfo=timezone.utc).timestamp()
+    client=Mock()
+    index=Index(client,'bucket','UTC')
+    objects=[]
+    for minute in [0,10,20,40,50,60]:
+        dt=datetime.fromtimestamp(start+minute*60,timezone.utc)
+        objects.append({'Key':f"sensor/camera/Dev2/{dt:%Y/%m/%d}/P430_{dt:%Y-%m-%d_%H-%M-%S}.mp4",'Size':1000000})
+    index.objects=lambda *args:objects
+    items=index.scan({'id':'camera','prefix':'sensor/camera/Dev2/'},start,start+3600)
+    assert cadence(items)[0]==600
+    assert coverage(items,start,start+3600,start+86400,600)['missing_seconds']==600
+    assert client.get_object.call_count==0
+    # A previously missing filename arriving late fills the original time.
+    dt=datetime.fromtimestamp(start+1800,timezone.utc)
+    objects.append({'Key':f"sensor/camera/Dev2/{dt:%Y/%m/%d}/P430_{dt:%Y-%m-%d_%H-%M-%S}.mp4",'Size':1000000})
+    assert coverage(index.scan({'id':'camera','prefix':'sensor/camera/Dev2/'},start,start+3600),start,start+3600,start+86400,600)['missing_seconds']==0
+
+
+def test_out_of_window_bad_headers_do_not_hide_current_recordings():
+    index=Index(Mock(),'bucket','UTC')
+    start=datetime(2026,10,13,tzinfo=timezone.utc).timestamp()
+    index.objects=lambda *args:[{'Key':'sensor/camera/P430_2026-09-01_00-05-59.mp4','Size':1000},
+        {'Key':'sensor/camera/P430_2026-10-13_00-00-00.mp4','Size':1000}]
+    items=index.scan({'id':'camera','prefix':'sensor/camera/'},start,start+600)
+    assert len(items)==1 and items[0]['end']==start+600
+
+
+@pytest.mark.parametrize('field,value',['Timestamp UTC,2026-10-13T06:00:00Z'.split(','),
+ ['ts_iso','2026-10-13T06:00:00+00:00'],['timestamp_ms','1791871200000']])
+def test_radar_timestamp_aliases(field,value):
+    from recordings import parse_csv_time
+    assert parse_csv_time({field:value},'UTC')==datetime(2026,10,13,6,tzinfo=timezone.utc).timestamp()

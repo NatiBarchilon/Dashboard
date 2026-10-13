@@ -1,15 +1,18 @@
 """Recording time index. Upload time never determines recording coverage."""
 import csv
 import io
+import json
 import math
-import os
+import logging
 import re
 import struct
 from collections import Counter
+from statistics import median
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+log = logging.getLogger("sensor-watch")
 UTC = timezone.utc
 PATTERNS = [
     (r'(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})', '%Y-%m-%d_%H-%M-%S'),
@@ -101,20 +104,46 @@ def mp4_duration(client, bucket, key, size):
                 child += n
             break
         pos += length
-    raise ValueError('MP4 duration not found')
+    raise ValueError('MP4 duration is stored in fragments; use filename coverage and browser playback')
+
+
+def normalized_row(row):
+    return {re.sub(r'[^a-z0-9]+','_',str(k).strip().lower()).strip('_'):v for k,v in row.items() if k is not None}
 
 
 def parse_csv_time(row, tz):
-    value = row.get('timestamp_utc') or row.get('timestamp_local') or row.get('timestamp') or row.get('time')
-    if not value:
-        return None
-    try:
-        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC if row.get('timestamp_utc') else ZoneInfo(tz))
-        return dt.timestamp()
-    except ValueError:
-        return None
+    row = normalized_row(row)
+    fields = ('timestamp_utc','ts_utc','utc_iso','timestamp_iso','ts_iso','timestamp_local',
+              'ts_local','local_iso','datetime','date_time','timestamp','time_iso','ts','time','datetime_utc',
+              'iso_time','utc_time','time_utc','utc','t','timestamp_s','timestamp_ms','ts_ms','unix_time','epoch')
+    extra=sorted((k for k,v in row.items() if k not in fields and ('time' in k or k.startswith('ts') or k.endswith('_iso') or re.match(r'^20\d{2}[-_/]\d{2}[-_/]\d{2}[T _]',str(v or '')))),key=lambda k:('utc' not in k,k))
+    for field in (*fields,*extra):
+        value = str(row.get(field) or '').strip()
+        if not value:
+            continue
+        try:
+            number = float(value)
+            if number > 1e15: number /= 1e6
+            elif number > 1e12: number /= 1e3
+            if 1e9 < number < 1e11:
+                return number
+        except ValueError:
+            pass
+        value = re.sub(r'\s+(UTC|GMT)$','+00:00',value).replace('Z','+00:00')
+        if len(value) > 10 and value[10] == '_': value = value[:10]+' '+value[11:]
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            dt = None
+            for fmt in ('%Y_%m_%d %H:%M:%S','%d_%m_%Y %H:%M:%S','%d/%m/%Y %H:%M:%S',
+                        '%Y-%m-%d %H:%M:%S.%f','%Y/%m/%d %H:%M:%S','%Y_%m_%d_%H%M%S','%d_%m_%Y %H%M%S'):
+                try: dt = datetime.strptime(value,fmt);break
+                except ValueError: continue
+        if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC if 'utc' in field else ZoneInfo(tz))
+            return dt.timestamp()
+    return None
 
 
 def radar_rows(client, bucket, key, size, tz):
@@ -126,16 +155,20 @@ def radar_rows(client, bucket, key, size, tz):
     finally:
         body.close()
     rows = []
-    for row in csv.DictReader(io.StringIO(content)):
+    try: dialect=csv.Sniffer().sniff(content[:8192],delimiters=',;\t')
+    except csv.Error: dialect='excel'
+    reader=csv.DictReader(io.StringIO(content),dialect=dialect)
+    for row in reader:
+        row=normalized_row(row)
         t = parse_csv_time(row, tz)
         if t is None:
             continue
-        state = row.get('state_code', row.get('presence', row.get('state', '')))
+        state = row.get('state_code', row.get('target_state', row.get('target_status', row.get('presence', row.get('presence_state', row.get('state', row.get('status', row.get('target_type',''))))))))
         try:
-            presence = 1 if int(state) in (1, 2, 3) else (0 if int(state) == 0 else None)
+            presence = 1 if int(float(state)) in (1, 2, 3) else (0 if int(float(state)) == 0 else None)
         except (ValueError, TypeError):
             presence = {'true':1, 'false':0, 'moving':1, 'stationary':1, 'both':1,
-                        'no target':0, 'none':0}.get(str(state).lower())
+                        'moving & stationary':1, 'moving+stationary':1, 'motion':1, 'static':1, 'occupied':1, 'present':1, 'no_target':0, 'absent':0, 'no target':0, 'none':0}.get(str(state).lower())
         def number(name):
             try:
                 v = float(row[name])
@@ -144,6 +177,8 @@ def radar_rows(client, bucket, key, size, tz):
                 return None
         rows.append({'t': t, 'presence': presence, 'distance_cm': number('detection_distance_cm'),
                      'moving_energy': number('moving_energy'), 'stationary_energy': number('stationary_energy')})
+    if not rows:
+        log.warning('RADAR_COLUMNS %s',json.dumps(reader.fieldnames or []))
     return sorted(rows, key=lambda r:r['t'])
 
 
@@ -151,6 +186,7 @@ class Index:
     def __init__(self, client, bucket, tz='Asia/Jerusalem'):
         self.client, self.bucket, self.tz = client, bucket, tz
         self.cache = {}
+        self.radar_columns_logged = set()
 
     def objects(self, prefix, start, end):
         day = datetime.fromtimestamp(start, ZoneInfo(self.tz)).date() - timedelta(days=1)
@@ -206,15 +242,60 @@ class Index:
         return item
 
     def scan(self,sensor,start,end):
+        # Coverage needs the recording filenames, not thousands of media downloads.
+        # Content metadata and plots are read only for a selected recording.
         objects = self.objects(sensor['prefix'],start,end)
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            items = list(pool.map(self.describe,objects))
-        return sorted([x for x in items if x['start'] is None or x.get('end') is None or (x['end'] > start and x['start'] < end)],key=lambda x:x['start'] or 0)
+        if sensor['id'] not in self.radar_columns_logged:
+            sample=next((o for o in objects if o['Key'].lower().endswith('.csv')),None)
+            if sample:
+                try:
+                    text=read_range(self.client,self.bucket,sample['Key'],0,min(4096,sample['Size'])).decode('utf-8-sig')
+                    lines=text.splitlines()
+                    log.info('RADAR_HEADER %s %s',sensor['id'],json.dumps(lines[:2]))
+                    self.radar_columns_logged.add(sensor['id'])
+                except Exception:
+                    log.warning('Radar header sample could not be read for %s',sensor['id'])
+        described=[]
+        for obj in objects:
+            t=recording_time(obj['Key'],self.tz)
+            # The prior-day listing covers files spanning midnight. Discard other
+            # out-of-window records before any metadata request or unknown marker.
+            if t is not None and (t < start-7200 or t >= end): continue
+            kind=obj['Key'].rsplit('.',1)[-1].lower()
+            described.append({'key':obj['Key'],'name':obj['Key'].rsplit('/',1)[-1],
+                'start':t,'size':obj['Size'],'kind':kind,'etag':obj.get('ETag')})
+        times=sorted(set(x['start'] for x in described if x['start'] is not None))
+        default=600 if any(x['kind']=='mp4' for x in described) or any(x in sensor['id'].lower() for x in ('cam','cage')) else 3600
+        deltas=[b-a for a,b in zip(times,times[1:]) if 30<=b-a<=7200]
+        counts=Counter(round(x/60)*60 for x in deltas)
+        nominal=float(sensor.get('segment_seconds') or default)
+        source='expected segment length'
+        if not sensor.get('segment_seconds') and counts:
+            candidate,count=counts.most_common(1)[0]
+            # Only infer regular supported segmentation, rather than treating a
+            # long outage or every-other-file gap as a longer recording.
+            if count>=3 and candidate in (300,600,900,3600):
+                nominal=median([x for x in deltas if abs(x-candidate)<30])
+                source='measured filename intervals'
+        if sensor.get('segment_seconds'): source='configured segment length'
+        out=[]
+        for item in described:
+            if item['start'] is None:
+                item.update(end=None,duration=None,error='Unknown or ambiguous filename timestamp')
+            else:
+                item.update(duration=nominal,end=item['start']+nominal,
+                            duration_source=source,coverage_basis='filename',nominal_seconds=nominal)
+                if item['end']<=start: continue
+            out.append(item)
+        return sorted(out,key=lambda x:x['start'] or 0)
+
 
 
 def cadence(items, override=None):
     if override:
         return float(override), 'configured'
+    inferred=next((x for x in items if x.get('nominal_seconds')),None)
+    if inferred: return inferred['nominal_seconds'],inferred['duration_source']
     durations = [x['duration'] for x in items if x.get('duration')]
     if len(durations) < 3:
         return None, 'insufficient data'
