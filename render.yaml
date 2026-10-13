@@ -5,7 +5,7 @@ services:
     plan: free
     region: frankfurt
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 1 --threads 4 --timeout 60 app:app
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 180 app:app
     autoDeploy: true
     healthCheckPath: /health
     envVars:
@@ -31,13 +31,7 @@ services:
         sync: false
       - key: DATA_TIMEZONE
         value: Asia/Jerusalem
-      - key: STALE_AFTER_HOURS
-        value: "2"
-      - key: CHECK_INTERVAL_MINUTES
-        value: "10"
-      - key: ALERT_WEBHOOK_URL
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
+      - key: UPLOAD_GRACE_SECONDS
+        value: "120"
+      - key: DISABLE_BACKGROUND_MONITOR
+        value: "true"

@@ -1,24 +1,10 @@
 <!doctype html>
-<html lang="en" dir="ltr">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>FreezeM Sensor Watch</title>
-  <style>
-    :root{font-family:Arial,sans-serif;color:#17212b;background:#eef3f6}body{margin:0}.wrap{max-width:1100px;margin:auto;padding:32px 20px}
-    header{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:24px}h1{margin:0;font-size:30px}.sub{color:#607080;margin-top:7px}
-    button{border:0;border-radius:10px;background:#087f8c;color:#fff;padding:11px 17px;font-weight:700;cursor:pointer}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
-    .card{background:white;border-radius:16px;padding:20px;box-shadow:0 5px 20px #17212b12;border-top:6px solid #83929e}.card.ok{border-color:#18a66a}.card.stale,.card.missing{border-color:#dc3f4f}
-    .head{display:flex;justify-content:space-between;align-items:center}.name{font-size:21px;font-weight:700}.pill{border-radius:999px;padding:5px 10px;font-size:13px;font-weight:700;background:#e8edf0}.ok .pill{background:#dff7ec;color:#087b4b}.stale .pill,.missing .pill{background:#ffe5e8;color:#ad1d2d}
-    .age{font-size:36px;font-weight:800;margin:25px 0 5px}.muted{color:#71808e;font-size:13px}.file{margin-top:16px;word-break:break-all;font-size:12px;color:#52616e}.error{display:none;background:#ffe5e8;color:#8c1422;padding:13px;border-radius:10px;margin-bottom:18px}
-    @media(max-width:600px){header{align-items:flex-start;flex-direction:column}.wrap{padding:22px 14px}}
-  </style>
-</head>
-<body><main class="wrap">
-  <header><div><h1>FreezeM Sensor Watch</h1><div class="sub" id="checked">Loading status…</div></div><div><button onclick="loadStatus()">Refresh now</button> <a href="/logout">Sign out</a></div></header>
-  <div id="error" class="error"></div><section id="grid" class="grid"></section>
-</main><script>
-const labels={ok:'Online',stale:'No recent file',missing:'No files found'};
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function loadStatus(){const error=document.querySelector('#error');try{const r=await fetch('/api/status',{cache:'no-store'});const d=await r.json();error.style.display=d.error?'block':'none';error.textContent=d.error||'';document.querySelector('#checked').textContent='Last checked: '+new Date(d.checked_at).toLocaleString('en-GB')+' · Alert threshold: '+d.threshold_hours+' hours';document.querySelector('#grid').innerHTML=d.systems.map(s=>`<article class="card ${esc(s.status)}"><div class="head"><span class="name">${esc(s.name)}</span><span class="pill">${labels[s.status]||s.status}</span></div><div class="age">${s.age_hours===null?'—':esc(s.age_hours)+' h'}</div><div class="muted">Since the latest file</div><div class="file">${esc(s.last_file||'No file found')}</div></article>`).join('')}catch(e){error.style.display='block';error.textContent='Could not load status: '+e}}
-loadStatus();setInterval(loadStatus,60000);
-</script></body></html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FreezeM · Recording Observatory</title><link rel="stylesheet" href="/static/dashboard.css"></head>
+<body><aside><div class="brand">Freeze<span>M</span><small>RECORDING OBSERVATORY</small></div><div class="nav active">◉ &nbsp; Collection overview</div><div class="aside-note">Two cameras.<br>One radar. One microphone.<br><br>All recording times shown in<br><strong>Asia/Jerusalem</strong></div><a href="/logout">Sign out ↗</a></aside>
+<main><header><div><div class="eyebrow">FIELD SYSTEMS / DATA INTEGRITY</div><h1>See exactly where data is missing.</h1><p id="checked">Connecting to monitoring service…</p></div><button id="refresh">↻ Refresh storage</button></header>
+<div id="notice" role="status"></div><section id="cards" class="cards"></section>
+<section class="panel"><div class="section-head"><div><h2>Collection timeline</h2><p>Click a recorded interval to inspect it. Late uploads fill the original recording time.</p></div><div class="controls"><select id="range" aria-label="Time range"><option value="3">Last 3 hours</option><option value="24" selected>Last 24 hours</option><option value="72">Last 3 days</option></select><button id="live" class="secondary">View latest</button><input aria-label="History date" id="date" type="date"><button class="secondary" id="history">View day</button></div></div><div class="legend"><i class="recorded"></i> Recorded <i class="missing"></i> Missing <i class="pending"></i> Recording / uploading <i class="unknown"></i> Unverified</div><div id="timeline"></div><div class="axis" id="axis"></div><div id="interval-detail" class="interval-detail">Click a red interval to see the missing times and duration.</div></section>
+<section class="panel"><div class="section-head"><div><h2>Missing intervals</h2><p>Every gap in the selected range: which system, when it starts, and how long it lasts.</p></div></div><div class="table-wrap"><table><thead><tr><th>System</th><th>From</th><th>Until</th><th>Duration</th><th>State</th></tr></thead><tbody id="gaps"></tbody></table></div></section>
+<section class="panel"><div class="section-head"><div><h2>Explore recordings</h2><p id="selection-note">Choose a system and a file, or click the timeline.</p></div><select id="sensor" aria-label="System"></select></div><div class="file-controls"><button class="secondary" id="prev">← Previous</button><select id="file" aria-label="Recording file"></select><button class="secondary" id="next">Next →</button><select id="speed" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></div><div id="viewer"><p class="empty">Your recordings will appear here after the first scan.</p></div></section>
+
+<footer>Recording time, not upload time · Scanned when you visit or refresh · No notifications</footer></main><script src="/static/dashboard.js"></script></body></html>
